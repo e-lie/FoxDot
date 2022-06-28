@@ -148,6 +148,8 @@ class TempoClock(object):
             try:
                 from LinkToPy import LinkInterface
                 self.alink = LinkInterface(path_to_carabiner=carabiner_path)
+                self.alink.set_bpm(bpm=self.bpm) # align on FoxDot bpm
+                self.set_time(beat=float(round(self.alink.beat_, 3)))
             except ImportError as err:
                 raise ImportError("LinkToPy not found... Please install from GitHub repository.")
         else:
@@ -295,14 +297,18 @@ class TempoClock(object):
         bpm_start_beat = next_bar
 
         def func():
-            
+
             if self.espgrid is not None:
 
                 self.espgrid.set_tempo(bpm)
 
             else:
 
-                object.__setattr__(self, "bpm", self._convert_json_bpm(bpm))
+                if self.alink is not None:
+                    self.alink.set_bpm(bpm=bpm)
+                    object.__setattr__(self, "bpm", bpm)
+                else:
+                    object.__setattr__(self, "bpm", self._convert_json_bpm(bpm))
                 self.last_now_call = self.bpm_start_time = bpm_start_time
                 self.bpm_start_beat = bpm_start_beat
 
@@ -395,13 +401,10 @@ class TempoClock(object):
             self.update_network_tempo(value, start_beat, start_time)
 
         elif attr == "midi_nudge" and self.__setup:
-
             # Adjust nudge for midi devices
-
             self.server.set_midi_nudge(value)
 
             object.__setattr__(self, "midi_nudge", value)
-                
         else:
 
             self.__dict__[attr] = value
@@ -480,8 +483,22 @@ class TempoClock(object):
         self.debugging = bool(on)
         return
 
-    def set_time(self, beat):
-        """ Set the clock time to 'beat' and update players in the clock """
+    def set_time_alink(self, beat):
+        """ Variant of set_time function to be used when sync with Carabiner
+        is established. """
+        now, cbeat = self.alink.now(), self.alink.beat_
+        self.start_time = now
+        self.queue.clear()
+        self.beat = round(float(cbeat), 3)
+        self.bpm_start_beat = round(float(cbeat), 3)
+        self.bpm_start_time = now
+        for player in self.playing:
+            player(count=True)
+        return
+
+    def _set_time(self, beat):
+        """ Vanilla mechanism for setting time. New version of the classic
+        set_time() method, unchanged. """
         self.start_time = time.time()
         self.queue.clear()
         self.beat = beat
@@ -491,6 +508,14 @@ class TempoClock(object):
         for player in self.playing:
             player(count=True)
         return
+
+    def set_time(self, beat):
+        """ Set the clock time to 'beat' and update players in the clock """
+        # TODO: note to self. It should be the right place to update everything
+        # for synchronisation with Ableton Link. The rest of the logic is fine.
+        # I should just be extra careful with this.
+        self.set_time_alink(beat) if self.alink is not None else self._set_time(beat)
+
 
     def calculate_nudge(self, time1, time2, latency):
         """ Approximates the nudge value of this TempoClock based on the machine time.time()
