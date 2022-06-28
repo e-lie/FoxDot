@@ -112,8 +112,9 @@ class TempoClock(object):
         # Midi Clock In
         self.midi_clock = None
 
-        # EspGrid sync
+        # EspGrid and Ableton Link sync
         self.espgrid = None
+        self.alink = None
 
         # Flag for next_bar wrapper
         self.now_flag  = False
@@ -140,6 +141,30 @@ class TempoClock(object):
         self.solo = SoloPlayer()
 
         self.thread = threading.Thread(target=self.run)
+
+    def link(self, carabiner_path, master=False):
+        """ Establish a link with Carabiner """
+        if self.alink is None:
+            try:
+                from LinkToPy import LinkInterface
+                self.alink = LinkInterface(path_to_carabiner=carabiner_path)
+            except ImportError as err:
+                raise ImportError("LinkToPy not found... Please install from GitHub repository.")
+        else:
+            print("Link already established...")
+
+    def unlink(self):
+        """ Kill the connexion to Carabiner """
+        if self.alink is not None:
+            del self.alink
+            self.alink = None
+
+    def report_time(self):
+        """ Report time between Carabiner and FoxDot """
+        if self.alink is None:
+            return
+        print(f"TEMPO : {self.alink.bpm_} (L) | {self.bpm} (F)")
+        print(f"BEAT:   {self.alink.beat_} (L) | {self.beat} (F)")
 
     def sync_to_espgrid(self, host="localhost", port=5510):
         """ Connects to an EspGrid instance """
