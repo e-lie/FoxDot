@@ -1,0 +1,18 @@
+d1 >> play('X X ', amp=2)
+
+Clock.link('/usr/local/bin/Carabiner')
+
+Clock.bpm = 120
+
+Clock.clear()
+
+def report():
+    print(Clock.bpm)
+    print(Clock.alink.bpm_)
+    print("===============")
+    print(Clock.beat)
+    print(Clock.alink.beat_)
+    
+report()
+
+Clock.alink.
