@@ -2,17 +2,17 @@
     Clock management for scheduling notes and functions. Anything 'callable', such as a function
     or instance with a `__call__` method, can be scheduled. An instance of `TempoClock` is created
     when FoxDot started up called `Clock`, which is used by `Player` instances to schedule musical
-    events. 
+    events.
 
     The `TempoClock` is also responsible for sending the osc messages to SuperCollider. It contains
     a queue of event blocks, instances of the `QueueBlock` class, which themselves contain queue
     items, instances of the `QueueObj` class, which themseles contain the actual object or function
-    to be called. The `TempoClock` is continually running and checks if any queue block should 
+    to be called. The `TempoClock` is continually running and checks if any queue block should
     be activated. A queue block has a "beat" value for which its contents should be activated. To make
     sure that events happen on time, the `TempoClock` will begin processing the contents 0.25
-    seconds before it is *actually* meant to happen in case there is a large amount to process.  When 
+    seconds before it is *actually* meant to happen in case there is a large amount to process.  When
     a queue block is activated, a new thread is created to process all of the callable objects it
-    contains. If it calls a `Player` object, the queue block keeps track of the OSC messages generated 
+    contains. If it calls a `Player` object, the queue block keeps track of the OSC messages generated
     until all `Player` objects in the block have been called. At this point the thread is told to
     sleep until the remainder of the 0.25 seconds has passed. This value is stored in `Clock.latency`
     and is adjustable. If you find that there is a noticeable jitter between events, i.e. irregular
@@ -24,7 +24,7 @@
     bound to the shortcut key, `Ctrl+.`. You can schedule non-player objects in the clock by
     using `Clock.schedule(func, beat, args, kwargs)`. By default `beat` is set to the next
     bar in the clock, but you use `Clock.now() + n` or `Clock.next_bar() + n` to schedule a function
-    in the future at a specific time. 
+    in the future at a specific time.
 
     To change the tempo of the clock, just set the bpm attribute using `Clock.bpm=val`. The change
     in tempo will occur at the start of the next bar so be careful if you schedule this action within
@@ -112,8 +112,9 @@ class TempoClock(object):
         # Midi Clock In
         self.midi_clock = None
 
-        # EspGrid sync
+        # EspGrid and Ableton Link sync
         self.espgrid = None
+        self.alink = None
 
         # Flag for next_bar wrapper
         self.now_flag  = False
@@ -140,6 +141,40 @@ class TempoClock(object):
         self.solo = SoloPlayer()
 
         self.thread = threading.Thread(target=self.run)
+
+    def link(self, carabiner_path="/usr/local/bin/Carabiner"):
+        """ Establish a link with Carabiner """
+        if self.alink is None:
+            try:
+                from LinkToPy import LinkInterface
+                self.alink = LinkInterface(path_to_carabiner=carabiner_path)
+
+                # New instance of LinkInterface
+                def align():
+                    self.alink.set_bpm(bpm=self.bpm) # align on FoxDot BPM
+                    self.alink.bpm_ = float(self.bpm) # override
+                    self.alink.force_beat_at_time(beat=int(self.beat), time_in_ms = 0, quantum=4)
+
+                self.schedule(obj= lambda:align())
+
+                # self.set_time(beat=float(abs(round(self.alink.beat_, 4))))
+            except ImportError as err:
+                raise ImportError("LinkToPy not found... Please install from GitHub repository.")
+        else:
+            print("Link already established...")
+
+    def unlink(self):
+        """ Kill the connexion to Carabiner """
+        if self.alink is not None:
+            del self.alink
+            self.alink = None
+
+    def report_time(self):
+        """ Report time between Carabiner and FoxDot """
+        if self.alink is None:
+            return
+        print(f"TEMPO : {self.alink.bpm_} (L) | {self.bpm} (F)")
+        print(f"BEAT:   {self.alink.beat_} (L) | {self.beat} (F)")
 
     def sync_to_espgrid(self, host="localhost", port=5510):
         """ Connects to an EspGrid instance """
@@ -270,14 +305,18 @@ class TempoClock(object):
         bpm_start_beat = next_bar
 
         def func():
-            
+
             if self.espgrid is not None:
 
                 self.espgrid.set_tempo(bpm)
 
             else:
 
-                object.__setattr__(self, "bpm", self._convert_json_bpm(bpm))
+                if self.alink is not None:
+                    self.alink.set_bpm(bpm=bpm)
+                    object.__setattr__(self, "bpm", bpm)
+                else:
+                    object.__setattr__(self, "bpm", self._convert_json_bpm(bpm))
                 self.last_now_call = self.bpm_start_time = bpm_start_time
                 self.bpm_start_beat = bpm_start_beat
 
@@ -370,13 +409,10 @@ class TempoClock(object):
             self.update_network_tempo(value, start_beat, start_time)
 
         elif attr == "midi_nudge" and self.__setup:
-
             # Adjust nudge for midi devices
-
             self.server.set_midi_nudge(value)
 
             object.__setattr__(self, "midi_nudge", value)
-                
         else:
 
             self.__dict__[attr] = value
@@ -455,8 +491,22 @@ class TempoClock(object):
         self.debugging = bool(on)
         return
 
-    def set_time(self, beat):
-        """ Set the clock time to 'beat' and update players in the clock """
+    def set_time_alink(self, beat):
+        """ Variant of set_time function to be used when sync with Carabiner
+        is established. """
+        cbeat = round(abs(float(self.alink.beat_)))
+        self.start_time = self.alink.now()
+        self.queue.clear()
+        self.beat = cbeat
+        self.bpm_start_beat = cbeat
+        self.bpm_start_time = self.alink.now()
+        for player in self.playing:
+            player(count=True)
+        return
+
+    def _set_time(self, beat):
+        """ Vanilla mechanism for setting time. New version of the classic
+        set_time() method, unchanged. """
         self.start_time = time.time()
         self.queue.clear()
         self.beat = beat
@@ -466,6 +516,14 @@ class TempoClock(object):
         for player in self.playing:
             player(count=True)
         return
+
+    def set_time(self, beat):
+        """ Set the clock time to 'beat' and update players in the clock """
+        # TODO: note to self. It should be the right place to update everything
+        # for synchronisation with Ableton Link. The rest of the logic is fine.
+        # I should just be extra careful with this.
+        self.set_time_alink(beat) if self.alink is not None else self._set_time(beat)
+
 
     def calculate_nudge(self, time1, time2, latency):
         """ Approximates the nudge value of this TempoClock based on the machine time.time()
@@ -499,7 +557,7 @@ class TempoClock(object):
         return data
 
     def _now(self):
-        """ If the bpm is an int or float, use time since the last bpm change to calculate what the current beat is. 
+        """ If the bpm is an int or float, use time since the last bpm change to calculate what the current beat is.
             If the bpm is a TimeVar, increase the beat counter by time since last call to _now()"""
         if isinstance(self.bpm, (int, float)):
             self.beat = self.bpm_start_beat + self.get_elapsed_beats_from_last_bpm_change()
