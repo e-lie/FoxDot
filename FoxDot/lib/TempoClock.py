@@ -141,17 +141,18 @@ class TempoClock(object):
         # If one object is going to played
         self.solo = SoloPlayer()
 
-        self.thread = threading.Thread(target=self.run)
-
-    def link(self, carabiner_path="/usr/local/bin/Carabiner", master: bool= False):
-        """ Establish a link with Carabiner """
-
         import psutil
-
         for proc in psutil.process_iter():
             if proc.name() in ["carabiner", "Carabiner"]:
-                print(f"{proc.name()} instance already exists. Killing to avoid duplication.")
+                print(f"{proc.name()} instance already exists. \
+                        Killing to avoid duplication.")
                 proc.kill()
+
+        self.thread = threading.Thread(target=self.run)
+
+    def link(self, carabiner_path="/usr/local/bin/Carabiner",
+             master: bool = False):
+        """ Establish a link with Carabiner """
 
         if self.alink is None:
             try:
@@ -164,14 +165,17 @@ class TempoClock(object):
                     if master:
                         self.alink.set_bpm(bpm=self.bpm) # align on FoxDot BPM
                     self.alink.bpm_ = float(self.bpm) # override
-                    self.alink.force_beat_at_time(beat=int(self.beat), time_in_ms = 0, quantum=4)
+                    self.alink.force_beat_at_time(
+                            beat=int(self.beat),
+                            time_in_ms=0,
+                            quantum=4)
                     self.updating_from_or_to_alink = False
-                    print(f"{proc.name()} instance already exists. Killing to avoid duplication.")
                 self.updating_from_or_to_alink = True
                 self.schedule(align_link, self.next_bar())
                 # self.set_time(beat=float(abs(round(self.alink.beat_, 4))))
             except ImportError as err:
-                raise ImportError("LinkToPy not found... Please install from GitHub repository.")
+                raise ImportError("LinkToPy not found... Please install \
+                        from GitHub repository.")
         else:
             print("Link already established...")
 
