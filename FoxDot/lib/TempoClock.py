@@ -62,6 +62,7 @@ from .Settings import CPU_USAGE, CLOCK_LATENCY
 import time
 from fractions import Fraction
 from traceback import format_exc as error_stack
+from .LinkToPy import LinkInterface
 
 import sys
 import threading
@@ -156,15 +157,19 @@ class TempoClock(object):
 
         if self.alink is None:
             try:
-                from LinkToPy import LinkInterface
                 # New instance of LinkInterface
-                self.alink = LinkInterface(path_to_carabiner=carabiner_path)
+                try:
+                    self.alink = LinkInterface(
+                            path_to_carabiner=carabiner_path)
+                except ChildProcessError as e:
+                    print(f"Couldn't bind in time... {e}")
+                    return
 
                 def align_link():
-                    print(f"Aligning Link (Carabiner) to FoxDot.")
+                    print("Aligning Link (Carabiner) to FoxDot.")
                     if master:
-                        self.alink.set_bpm(bpm=self.bpm) # align on FoxDot BPM
-                    self.alink.bpm_ = float(self.bpm) # override
+                        self.alink.set_bpm(bpm=self.bpm)
+                    self.alink.bpm_ = float(self.bpm)
                     self.alink.force_beat_at_time(
                             beat=int(self.beat),
                             time_in_ms=0,
